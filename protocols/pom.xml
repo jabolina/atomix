@@ -27,6 +27,7 @@
   <name>Atomix Protocols Parent</name>
 
   <modules>
+    <module>generic-multicast</module>
     <module>gossip</module>
     <module>log</module>
     <module>primary-backup</module>

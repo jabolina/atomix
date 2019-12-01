@@ -20,3 +20,4 @@ agent/data/
 data/
 .data/
 .sts4-cache/
+.attach_pid*
