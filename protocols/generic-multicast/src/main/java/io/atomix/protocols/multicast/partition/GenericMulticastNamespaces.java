@@ -34,11 +34,13 @@ import io.atomix.protocols.multicast.protocol.message.request.CloseRequest;
 import io.atomix.protocols.multicast.protocol.message.request.ComputeRequest;
 import io.atomix.protocols.multicast.protocol.message.request.ExecuteRequest;
 import io.atomix.protocols.multicast.protocol.message.request.GatherRequest;
+import io.atomix.protocols.multicast.protocol.message.request.RestoreRequest;
 import io.atomix.protocols.multicast.protocol.message.response.CloseResponse;
 import io.atomix.protocols.multicast.protocol.message.response.ComputeResponse;
 import io.atomix.protocols.multicast.protocol.message.response.ExecuteResponse;
 import io.atomix.protocols.multicast.protocol.message.response.GatherResponse;
 import io.atomix.protocols.multicast.protocol.message.response.GenericMulticastResponse;
+import io.atomix.protocols.multicast.protocol.message.response.RestoreResponse;
 import io.atomix.utils.serializer.Namespace;
 import io.atomix.utils.serializer.Namespaces;
 
@@ -63,6 +65,8 @@ public final class GenericMulticastNamespaces {
       .register(GatherResponse.class)
       .register(ComputeRequest.class)
       .register(ComputeResponse.class)
+      .register(RestoreRequest.class)
+      .register(RestoreResponse.class)
       .register(GenericMulticastResponse.Status.class)
       .register(OperationRequest.class)
       .register(OperationResponse.class)

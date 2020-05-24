@@ -24,8 +24,7 @@ class GenericMulticastMessageContext {
   final String execute;
   final String compute;
   final String gather;
-  final String replicate;
-  final String metadata;
+  final String restore;
   final String close;
 
   GenericMulticastMessageContext(String prefix) {
@@ -33,8 +32,7 @@ class GenericMulticastMessageContext {
     this.execute = getSubject(prefix, "execute");
     this.compute = getSubject(prefix, "compute");
     this.gather = getSubject(prefix, "gather");
-    this.replicate = getSubject(prefix, "replicate");
-    this.metadata = getSubject(prefix, "metadata");
+    this.restore = getSubject(prefix, "restore");
     this.close = getSubject(prefix, "close");
   }
 

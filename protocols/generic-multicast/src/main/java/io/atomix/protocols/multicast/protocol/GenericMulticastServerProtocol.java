@@ -22,10 +22,12 @@ import io.atomix.protocols.multicast.protocol.message.request.CloseRequest;
 import io.atomix.protocols.multicast.protocol.message.request.ComputeRequest;
 import io.atomix.protocols.multicast.protocol.message.request.ExecuteRequest;
 import io.atomix.protocols.multicast.protocol.message.request.GatherRequest;
+import io.atomix.protocols.multicast.protocol.message.request.RestoreRequest;
 import io.atomix.protocols.multicast.protocol.message.response.CloseResponse;
 import io.atomix.protocols.multicast.protocol.message.response.ComputeResponse;
 import io.atomix.protocols.multicast.protocol.message.response.ExecuteResponse;
 import io.atomix.protocols.multicast.protocol.message.response.GatherResponse;
+import io.atomix.protocols.multicast.protocol.message.response.RestoreResponse;
 
 import java.util.Collection;
 import java.util.concurrent.CompletableFuture;
@@ -84,6 +86,18 @@ public interface GenericMulticastServerProtocol {
   void unregisterGatherHandler();
 
   /**
+   * Register an restore request callback
+   *
+   * @param handler: callback
+   */
+  void registerRestoreHandler(Function<RestoreRequest, CompletableFuture<RestoreResponse>> handler);
+
+  /**
+   * Unregister restore callback
+   */
+  void unregisterRestoreHandler();
+
+  /**
    * Sends a primitive event to a generic multicast node
    *
    * @param memberId who will publish the event
@@ -126,4 +140,13 @@ public interface GenericMulticastServerProtocol {
    * @return future with close request response
    */
   CompletableFuture<CloseResponse> close(CloseRequest request, MemberId memberId);
+
+  /**
+   * Handler for restore request
+   *
+   * @param request: restore request
+   * @param memberId: who sent the message
+   * @return future with restore request response
+   */
+  CompletableFuture<RestoreResponse> restore(RestoreRequest request, MemberId memberId);
 }

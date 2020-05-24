@@ -30,10 +30,12 @@ import io.atomix.protocols.multicast.protocol.message.request.ComputeRequest;
 import io.atomix.protocols.multicast.protocol.message.request.ExecuteRequest;
 import io.atomix.protocols.multicast.protocol.message.request.GatherRequest;
 import io.atomix.protocols.multicast.protocol.message.request.Request;
+import io.atomix.protocols.multicast.protocol.message.request.RestoreRequest;
 import io.atomix.protocols.multicast.protocol.message.response.CloseResponse;
 import io.atomix.protocols.multicast.protocol.message.response.ComputeResponse;
 import io.atomix.protocols.multicast.protocol.message.response.ExecuteResponse;
 import io.atomix.protocols.multicast.protocol.message.response.GatherResponse;
+import io.atomix.protocols.multicast.protocol.message.response.RestoreResponse;
 import io.atomix.protocols.multicast.service.GenericMulticastServiceContext;
 import io.atomix.utils.Managed;
 import io.atomix.utils.concurrent.Futures;
@@ -162,6 +164,7 @@ public class GenericMulticastServerContext implements Managed<Void> {
     protocol.registerComputeHandler(this::compute);
     protocol.registerGatherHandler(this::gather);
     protocol.registerCloseHandler(this::close);
+    protocol.registerRestoreHandler(this::restore);
   }
 
   /**
@@ -172,6 +175,7 @@ public class GenericMulticastServerContext implements Managed<Void> {
     protocol.unregisterComputeHandler();
     protocol.unregisterGatherHandler();
     protocol.unregisterCloseHandler();
+    protocol.unregisterRestoreHandler();
   }
 
   /**
@@ -208,5 +212,15 @@ public class GenericMulticastServerContext implements Managed<Void> {
    */
   private CompletableFuture<CloseResponse> close(CloseRequest request) {
     return service(request).thenCompose(context -> context.close(request));
+  }
+
+  /**
+   * Handler restore request
+   *
+   * @param request: restore request
+   * @return future with restore response
+   */
+  private CompletableFuture<RestoreResponse> restore(RestoreRequest request) {
+    return service(request).thenCompose(context -> context.restore(request));
   }
 }

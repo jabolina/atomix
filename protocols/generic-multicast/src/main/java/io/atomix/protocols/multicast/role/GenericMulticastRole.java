@@ -22,10 +22,12 @@ import io.atomix.protocols.multicast.protocol.message.request.CloseRequest;
 import io.atomix.protocols.multicast.protocol.message.request.ComputeRequest;
 import io.atomix.protocols.multicast.protocol.message.request.ExecuteRequest;
 import io.atomix.protocols.multicast.protocol.message.request.GatherRequest;
+import io.atomix.protocols.multicast.protocol.message.request.RestoreRequest;
 import io.atomix.protocols.multicast.protocol.message.response.CloseResponse;
 import io.atomix.protocols.multicast.protocol.message.response.ComputeResponse;
 import io.atomix.protocols.multicast.protocol.message.response.ExecuteResponse;
 import io.atomix.protocols.multicast.protocol.message.response.GatherResponse;
+import io.atomix.protocols.multicast.protocol.message.response.RestoreResponse;
 import io.atomix.protocols.multicast.service.GenericMulticastServiceContext;
 import io.atomix.utils.Managed;
 
@@ -101,6 +103,14 @@ public interface GenericMulticastRole extends Managed<GenericMulticastRole> {
    * @return future to be completed with a close response
    */
   CompletableFuture<CloseResponse> onClose(CloseRequest request);
+
+  /**
+   * Used when a member of the protocol needs to restore the state machine.
+   *
+   * @param request: request sent
+   * @return a future with the request response
+   */
+  CompletableFuture<RestoreResponse> onRestore(RestoreRequest request);
 
   <T extends OperationResponse> CompletableFuture<T> commit(OperationRequest req, T res, OperationResponse.Builder<?, T> builder, long timestamp, long index);
 

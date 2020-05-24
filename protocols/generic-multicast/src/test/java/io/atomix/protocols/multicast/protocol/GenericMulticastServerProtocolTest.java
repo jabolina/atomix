@@ -22,10 +22,12 @@ import io.atomix.protocols.multicast.protocol.message.request.CloseRequest;
 import io.atomix.protocols.multicast.protocol.message.request.ComputeRequest;
 import io.atomix.protocols.multicast.protocol.message.request.ExecuteRequest;
 import io.atomix.protocols.multicast.protocol.message.request.GatherRequest;
+import io.atomix.protocols.multicast.protocol.message.request.RestoreRequest;
 import io.atomix.protocols.multicast.protocol.message.response.CloseResponse;
 import io.atomix.protocols.multicast.protocol.message.response.ComputeResponse;
 import io.atomix.protocols.multicast.protocol.message.response.ExecuteResponse;
 import io.atomix.protocols.multicast.protocol.message.response.GatherResponse;
+import io.atomix.protocols.multicast.protocol.message.response.RestoreResponse;
 import io.atomix.utils.concurrent.Futures;
 
 import java.net.ConnectException;
@@ -39,6 +41,7 @@ public class GenericMulticastServerProtocolTest extends GenericMulticastProtocol
   private Function<ComputeRequest, CompletableFuture<ComputeResponse>> computeHandler;
   private Function<GatherRequest, CompletableFuture<GatherResponse>> gatherHandler;
   private Function<CloseRequest, CompletableFuture<CloseResponse>> closeHandler;
+  private Function<RestoreRequest, CompletableFuture<RestoreResponse>> restoreHandler;
 
   protected GenericMulticastServerProtocolTest(MemberId memberId, Map<MemberId, GenericMulticastServerProtocolTest> servers, Map<MemberId, GenericMulticastClientProtocolTest> clients) {
     super(servers, clients);
@@ -106,6 +109,16 @@ public class GenericMulticastServerProtocolTest extends GenericMulticastProtocol
   }
 
   @Override
+  public void registerRestoreHandler(Function<RestoreRequest, CompletableFuture<RestoreResponse>> handler) {
+    this.restoreHandler = handler;
+  }
+
+  @Override
+  public void unregisterRestoreHandler() {
+    this.restoreHandler = null;
+  }
+
+  @Override
   public void event(MemberId memberId, SessionId sessionId, PrimitiveEvent event) {
     getClient(memberId).thenAccept(client -> client.event(sessionId, event));
   }
@@ -134,6 +147,14 @@ public class GenericMulticastServerProtocolTest extends GenericMulticastProtocol
     }
 
     return closeHandler.apply(request);
+  }
+
+  @Override
+  public CompletableFuture<RestoreResponse> restore(RestoreRequest request, MemberId memberId) {
+    if (restoreHandler == null) {
+      return Futures.exceptionalFuture(new ConnectException("Restore handler not exists!"));
+    }
+    return restoreHandler.apply(request);
   }
 
   CompletableFuture<ExecuteResponse> execute(ExecuteRequest request) {

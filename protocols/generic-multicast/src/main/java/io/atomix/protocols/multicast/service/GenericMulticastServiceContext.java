@@ -30,7 +30,9 @@ import io.atomix.primitive.partition.PrimaryTerm;
 import io.atomix.primitive.service.PrimitiveService;
 import io.atomix.primitive.service.ServiceConfig;
 import io.atomix.primitive.service.ServiceContext;
+import io.atomix.primitive.service.impl.DefaultBackupInput;
 import io.atomix.primitive.session.Session;
+import io.atomix.protocols.multicast.exception.GenericMulticastException;
 import io.atomix.protocols.multicast.impl.GenericMulticastSession;
 import io.atomix.protocols.multicast.protocol.GenericMulticastServerProtocol;
 import io.atomix.protocols.multicast.protocol.PrimitiveDescriptor;
@@ -38,14 +40,20 @@ import io.atomix.protocols.multicast.protocol.message.request.CloseRequest;
 import io.atomix.protocols.multicast.protocol.message.request.ComputeRequest;
 import io.atomix.protocols.multicast.protocol.message.request.ExecuteRequest;
 import io.atomix.protocols.multicast.protocol.message.request.GatherRequest;
+import io.atomix.protocols.multicast.protocol.message.request.RestoreRequest;
 import io.atomix.protocols.multicast.protocol.message.response.CloseResponse;
 import io.atomix.protocols.multicast.protocol.message.response.ComputeResponse;
 import io.atomix.protocols.multicast.protocol.message.response.ExecuteResponse;
 import io.atomix.protocols.multicast.protocol.message.response.GatherResponse;
+import io.atomix.protocols.multicast.protocol.message.response.GenericMulticastResponse;
+import io.atomix.protocols.multicast.protocol.message.response.RestoreResponse;
 import io.atomix.protocols.multicast.role.GenericMulticastRole;
 import io.atomix.protocols.multicast.role.TrulyGenericMulticastRole;
 import io.atomix.protocols.multicast.session.GenericMulticastSessionManager;
+import io.atomix.storage.buffer.Buffer;
+import io.atomix.storage.buffer.HeapBuffer;
 import io.atomix.utils.concurrent.ComposableFuture;
+import io.atomix.utils.concurrent.Futures;
 import io.atomix.utils.concurrent.ThreadContext;
 import io.atomix.utils.logging.ContextualLoggerFactory;
 import io.atomix.utils.logging.LoggerContext;
@@ -58,10 +66,9 @@ import org.slf4j.Logger;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
-
-import static com.google.common.base.MoreObjects.toStringHelper;
 
 public class GenericMulticastServiceContext implements ServiceContext {
   private final Logger log;
@@ -85,22 +92,22 @@ public class GenericMulticastServiceContext implements ServiceContext {
       return new WallClockTimestamp(currentTimestamp);
     }
   };
+  private OperationType currentOperation = OperationType.COMMAND;
+  private Session currentSession;
+  private long operationIndex;
   private final LogicalClock logicalClock = new LogicalClock() {
     @Override
     public LogicalTimestamp getTime() {
       return new LogicalTimestamp(operationIndex);
     }
   };
-  private final PrimaryElectionEventListener primaryElectionListener = ev -> changeParticipants(ev.term());
-  private final ClusterMembershipEventListener membershipEventListener = this::handleClusterEvent;
-
-  private OperationType currentOperation = OperationType.COMMAND;
-  private Session currentSession;
-  private long operationIndex;
   private long currentIndex;
   private long currentTerm;
   private GenericMulticastRole localParticipant;
   private List<MemberId> members;
+  private volatile boolean synchronizedOnce = false;
+  private final PrimaryElectionEventListener primaryElectionListener = ev -> changeParticipants(ev.term());
+  private final ClusterMembershipEventListener membershipEventListener = this::handleClusterEvent;
 
   public GenericMulticastServiceContext(
       String serverName,
@@ -183,6 +190,10 @@ public class GenericMulticastServiceContext implements ServiceContext {
   @Override
   public WallClock wallClock() {
     return wallClock;
+  }
+
+  public long term() {
+    return currentTerm;
   }
 
   public PrimitiveService primitiveService() {
@@ -280,6 +291,14 @@ public class GenericMulticastServiceContext implements ServiceContext {
     return currentIndex;
   }
 
+  public void resetIndex(long index, long timestamp) {
+    currentOperation = OperationType.COMMAND;
+    operationIndex = index;
+    currentIndex = index;
+    currentTimestamp = timestamp;
+    service.tick(new WallClockTimestamp(currentTimestamp));
+  }
+
   /**
    * Returns the current wall clock timestamp.
    *
@@ -340,7 +359,7 @@ public class GenericMulticastServiceContext implements ServiceContext {
    */
   public CompletableFuture<ExecuteResponse> execute(ExecuteRequest request) {
     ComposableFuture<ExecuteResponse> future = new ComposableFuture<>();
-    threadContext.execute(() -> localParticipant.onExecute(request).whenComplete(future));
+    threadContext.execute(() -> verifySynchronization(request).whenComplete(future));
     return future;
   }
 
@@ -380,6 +399,18 @@ public class GenericMulticastServiceContext implements ServiceContext {
     return future;
   }
 
+  /**
+   * Handles a restore request
+   *
+   * @param request: the restore request
+   * @return future to be completed with a restore response
+   */
+  public CompletableFuture<RestoreResponse> restore(RestoreRequest request) {
+    ComposableFuture<RestoreResponse> future = new ComposableFuture<>();
+    threadContext.execute(() -> localParticipant.onRestore(request).whenComplete(future));
+    return future;
+  }
+
   public GenericMulticastRole getLocalParticipant() {
     return localParticipant;
   }
@@ -394,18 +425,60 @@ public class GenericMulticastServiceContext implements ServiceContext {
       if (term.term() > currentTerm) {
         log.debug("Term changed {}", term);
         currentTerm = term.term();
-        MemberId primary = term.primary().memberId();
         members = term.candidates()
             .stream()
             .map(GroupMember::memberId)
             .collect(Collectors.toList());
-        if (!members.contains(primary)) {
-          members.add(primary);
-        }
-        log.info("participants {}", toStringHelper(members));
       }
     });
   }
+
+  private ComposableFuture<ExecuteResponse> verifySynchronization(ExecuteRequest request) {
+    ComposableFuture<ExecuteResponse> future = new ComposableFuture<>();
+    threadContext.execute(() -> restoreStateMachine().thenApply(v -> localParticipant.onExecute(request).whenComplete(future)));
+    return future;
+  }
+
+  private CompletableFuture<RestoreResponse> restoreStateMachine() {
+    if (synchronizedOnce) {
+      return Futures.completedFuture(RestoreResponse.builder()
+          .withIdentifier(UUID.randomUUID())
+          .withStatus(GenericMulticastResponse.Status.OK)
+          .withTs(currentTimestamp)
+          .build());
+    }
+
+    synchronizedOnce = true;
+    CompletableFuture<RestoreResponse> future = new CompletableFuture<>();
+    for (MemberId someParticipant : members) {
+      if (!someParticipant.equals(localMemberId)) {
+        log.info("Asked for history from {} to {}", localMemberId, someParticipant);
+        protocol.restore(RestoreRequest.request(descriptor, currentTerm, currentSession != null ? currentSession.sessionId().id() : 1), someParticipant)
+            .whenCompleteAsync((response, error) -> {
+              if (error == null && response.status().equals(GenericMulticastResponse.Status.OK)) {
+                log.debug("Restoring member {} ", localMemberId());
+                Buffer buffer = HeapBuffer.wrap(response.result());
+                int sessions = buffer.readInt();
+                long index = buffer.readLong();
+
+                this.resetIndex(index, response.ts());
+                for (int i = 0; i < sessions; i++) {
+                  sessionManager.getOrCreate(buffer.readLong(), MemberId.from(buffer.readString()));
+                }
+
+                service.restore(new DefaultBackupInput(buffer, service.serializer()));
+                future.complete(response);
+              } else {
+                log.error("Error restoring {}", localMemberId, error);
+                future.completeExceptionally(error != null ? error : new GenericMulticastException.CommandFailure(response.error().message()));
+              }
+            });
+        break;
+      }
+    }
+    return future;
+  }
+
 
   /**
    * handle cluster events
@@ -414,7 +487,7 @@ public class GenericMulticastServiceContext implements ServiceContext {
    */
   private void handleClusterEvent(ClusterMembershipEvent event) {
     threadContext.execute(() -> {
-      log.info("cluster ev {}", event);
+      log.debug("cluster ev {}", event);
       if (ClusterMembershipEvent.Type.MEMBER_REMOVED.equals(event.type())) {
         members.remove(event.subject().id());
         for (GenericMulticastSession session: sessionManager.values()) {

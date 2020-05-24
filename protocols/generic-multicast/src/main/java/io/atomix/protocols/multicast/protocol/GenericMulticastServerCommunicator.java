@@ -24,10 +24,12 @@ import io.atomix.protocols.multicast.protocol.message.request.CloseRequest;
 import io.atomix.protocols.multicast.protocol.message.request.ComputeRequest;
 import io.atomix.protocols.multicast.protocol.message.request.ExecuteRequest;
 import io.atomix.protocols.multicast.protocol.message.request.GatherRequest;
+import io.atomix.protocols.multicast.protocol.message.request.RestoreRequest;
 import io.atomix.protocols.multicast.protocol.message.response.CloseResponse;
 import io.atomix.protocols.multicast.protocol.message.response.ComputeResponse;
 import io.atomix.protocols.multicast.protocol.message.response.ExecuteResponse;
 import io.atomix.protocols.multicast.protocol.message.response.GatherResponse;
+import io.atomix.protocols.multicast.protocol.message.response.RestoreResponse;
 import io.atomix.utils.serializer.Serializer;
 
 import java.util.Collection;
@@ -102,6 +104,16 @@ public class GenericMulticastServerCommunicator implements GenericMulticastServe
   }
 
   @Override
+  public void registerRestoreHandler(Function<RestoreRequest, CompletableFuture<RestoreResponse>> handler) {
+    clusterCommunicator.subscribe(context.restore, serializer::decode, handler, serializer::encode);
+  }
+
+  @Override
+  public void unregisterRestoreHandler() {
+    clusterCommunicator.unsubscribe(context.restore);
+  }
+
+  @Override
   public void event(MemberId memberId, SessionId sessionId, PrimitiveEvent event) {
     clusterCommunicator.unicast(context.eventSubject(sessionId.id()), event, serializer::encode, memberId);
   }
@@ -124,5 +136,10 @@ public class GenericMulticastServerCommunicator implements GenericMulticastServe
   @Override
   public CompletableFuture<CloseResponse> close(CloseRequest request, MemberId memberId) {
     return sendAndReceive(context.close, request, memberId);
+  }
+
+  @Override
+  public CompletableFuture<RestoreResponse> restore(RestoreRequest request, MemberId memberId) {
+    return sendAndReceive(context.restore, request, memberId);
   }
 }

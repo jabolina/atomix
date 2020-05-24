@@ -16,20 +16,28 @@
 package io.atomix.protocols.multicast.role;
 
 import io.atomix.cluster.MemberId;
+import io.atomix.primitive.service.impl.DefaultBackupOutput;
 import io.atomix.primitive.service.impl.DefaultCommit;
 import io.atomix.primitive.session.Session;
 import io.atomix.protocols.multicast.exception.GenericMulticastError;
+import io.atomix.protocols.multicast.impl.GenericMulticastSession;
 import io.atomix.protocols.multicast.protocol.message.operation.OperationRequest;
 import io.atomix.protocols.multicast.protocol.message.operation.OperationResponse;
 import io.atomix.protocols.multicast.protocol.message.request.ExecuteRequest;
+import io.atomix.protocols.multicast.protocol.message.request.RestoreRequest;
 import io.atomix.protocols.multicast.protocol.message.response.ExecuteResponse;
 import io.atomix.protocols.multicast.protocol.message.response.GenericMulticastResponse;
+import io.atomix.protocols.multicast.protocol.message.response.RestoreResponse;
 import io.atomix.protocols.multicast.role.conflict.GenericMulticastConflictHandler;
 import io.atomix.protocols.multicast.service.GenericMulticastServiceContext;
+import io.atomix.storage.buffer.HeapBuffer;
+import io.atomix.utils.concurrent.Futures;
 import io.atomix.utils.logging.ContextualLoggerFactory;
 import io.atomix.utils.logging.LoggerContext;
 import org.slf4j.Logger;
 
+import java.util.Collection;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 public abstract class AbstractGenericMulticastRole implements GenericMulticastRole {
@@ -48,6 +56,43 @@ public abstract class AbstractGenericMulticastRole implements GenericMulticastRo
     GenericMulticastDeliverSequence sequence = new GenericMulticastDeliverSequence(handler, log, serviceContext);
     this.issuer = new BatchedIssuer(serviceContext, sequence, log);
     this.running = false;
+  }
+
+  @Override
+  public CompletableFuture<RestoreResponse> onRestore(RestoreRequest request) {
+    if (request.term() != serviceContext.term()) {
+      // term changed while restoring, not up-to-date anymore
+      return Futures.completedFuture(RestoreResponse.builder()
+          .withError(GenericMulticastError.Error.COMMAND_FAILURE)
+          .withStatus(GenericMulticastResponse.Status.ERROR)
+          .withTs(0)
+          .withIdentifier(UUID.randomUUID())
+          .build());
+    }
+
+    HeapBuffer buffer = HeapBuffer.allocate();
+    try {
+      Collection<GenericMulticastSession> sessions = serviceContext.sessionManager().values();
+      buffer.writeInt(sessions.size());
+      buffer.writeLong(serviceContext.currentIndex());
+      for (Session session: sessions) {
+        buffer.writeLong(session.sessionId().id());
+        buffer.writeString(session.memberId().id());
+      }
+
+      serviceContext.primitiveService().backup(new DefaultBackupOutput(buffer, serviceContext.primitiveService().serializer()));
+      buffer.flip();
+      byte[] bytes = buffer.readBytes(buffer.remaining());
+      return Futures.completedFuture(RestoreResponse.builder()
+          .withIdentifier(UUID.randomUUID())
+          .withTs(System.currentTimeMillis())
+          .withStatus(GenericMulticastResponse.Status.OK)
+          .withResult(bytes)
+          .build());
+    } finally {
+      log.info("Restore finished answering");
+      buffer.release();
+    }
   }
 
   @Override
@@ -101,7 +146,7 @@ public abstract class AbstractGenericMulticastRole implements GenericMulticastRo
         .withError(res.error());
   }
 
-  protected <T extends OperationRequest, U extends OperationRequest.Builder<U, T>> OperationRequest.Builder<U, T> preBuild(OperationRequest.Builder<U, T> builder, OperationRequest request, Session session) {
+  private <T extends OperationRequest, U extends OperationRequest.Builder<U, T>> OperationRequest.Builder<U, T> preBuild(OperationRequest.Builder<U, T> builder, OperationRequest request, Session session) {
     return builder
         .withIdentifier(request.identifier())
         .withMemberId(request.memberId())

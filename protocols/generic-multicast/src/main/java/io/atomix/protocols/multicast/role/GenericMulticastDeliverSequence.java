@@ -160,6 +160,7 @@ public final class GenericMulticastDeliverSequence<T extends OperationRequest, U
    * @param holder: Holder containing the request metadata
    * @return true if completed, false otherwise
    */
+  @SuppressWarnings("unchecked")
   private boolean deliver(Holder holder) {
     try {
       if (holder.future == null || holder.response == null) {
